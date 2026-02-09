@@ -432,8 +432,85 @@ def build_dashboard(df: pd.DataFrame):
                 ),
             )
             st.plotly_chart(fig_exceptions, use_container_width=True)
+            # 🔹 Tableau récapitulatif des Top 10 exceptions
+            st.markdown("### Détail des Top 10 exceptions")
+
+            table_top_exceptions = top_exceptions[
+                [EXCEPTION_COL, "Nombre"]
+            ].rename(
+                columns={
+                    EXCEPTION_COL: "Exception",
+                    "Nombre": "Nombre d'occurrences"
+                }
+            )
+
+            st.dataframe(
+                table_top_exceptions,
+                use_container_width=True
+            )
+
     else:
         st.info(f"La colonne '{EXCEPTION_COL}' n'existe pas dans les données.")
+
+    
+    # 🔹 Line plot : évolution journalière des Top 10 exceptions
+    st.markdown("### Évolution journalière des Top 10 exceptions")
+
+    # Noms des Top 10 exceptions (issus du camembert)
+    top_10_exception_names = top_exceptions[EXCEPTION_COL].tolist()
+
+    # Filtrer les données dédupliquées sur les Top 10 exceptions
+    df_top_exc_time = df_pie[
+        df_pie[EXCEPTION_COL].isin(top_10_exception_names)
+    ].copy()
+
+    # Normalisation de la date
+    df_top_exc_time[DATE_COL] = pd.to_datetime(
+        df_top_exc_time[DATE_COL]
+    ).dt.normalize()
+
+    # 🔹 Libellés courts pour la légende (même logique que le pie chart)
+    max_len = 60
+    df_top_exc_time["Exception_courte"] = (
+        df_top_exc_time[EXCEPTION_COL]
+        .astype(str)
+        .str.slice(0, max_len)
+    )
+
+    mask_tronque = df_top_exc_time[EXCEPTION_COL].str.len() > max_len
+    df_top_exc_time.loc[mask_tronque, "Exception_courte"] = (
+        df_top_exc_time.loc[mask_tronque, "Exception_courte"] + "..."
+    )
+
+    # Agrégation journalière par exception
+    daily_exception_counts = (
+        df_top_exc_time
+        .groupby([DATE_COL, "Exception_courte"])
+        .size()
+        .reset_index(name="Nombre d'occurrences")
+    )
+
+    # Line plot avec 10 courbes
+    fig_exc_trend = px.line(
+        daily_exception_counts,
+        x=DATE_COL,
+        y="Nombre d'occurrences",
+        color="Exception_courte",
+        markers=True,
+    )
+
+    # Ajustements de lisibilité
+    fig_exc_trend.update_layout(
+        legend_title_text="Exception",
+        legend=dict(
+            font=dict(size=10),
+        ),
+        margin=dict(l=0, r=0, t=40, b=0),
+    )
+
+    fig_exc_trend.update_yaxes(type="log")
+
+    st.plotly_chart(fig_exc_trend, use_container_width=True)
 
 
 # =========================
