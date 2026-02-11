@@ -689,6 +689,15 @@ Cette application permet d'analyser quotidiennement les tickets à partir d'un f
 
             # Génération du fichier Excel en mémoire
             # La feuille 1 'Synthèse' doit contenir les statistiques pour toutes les dates
+
+            # Trier les nouveaux tickets par Exception
+            if EXCEPTION_COL in nouveaux_df.columns:
+                nouveaux_df = nouveaux_df.sort_values(by=EXCEPTION_COL, ascending=True)
+
+            # Trier les tickets traités par Exception
+            if EXCEPTION_COL in traites_df.columns:
+                traites_df = traites_df.sort_values(by=EXCEPTION_COL, ascending=True)
+
             excel_bytes = generate_excel_bytes(synthese_all_df, nouveaux_df, traites_df)
             st.session_state.excel_bytes = excel_bytes
 
@@ -863,6 +872,168 @@ Cette application permet d'analyser quotidiennement les tickets à partir d'un f
                         st.info(
                             "Aucune exception distincte à afficher pour la période sélectionnée."
                         )
+
+                    # ======================================================
+                    # 🔵 GRAPHIQUE FINAL : Évolution journalière des Top 10 exceptions
+                    # ======================================================
+
+                    st.subheader("Évolution journalière des Top 10 exceptions")
+
+                    # 1) Sélection des Top 10 exceptions
+                    top10 = exceptions_stats.head(10)[EXCEPTION_COL].tolist()
+
+                    # 2) Filtrer les données sur la période + top10
+                    df_top10_period = df_period[df_period[EXCEPTION_COL].isin(top10)].copy()
+
+                    # 3) Générer les dates continues de la période
+                    all_dates = pd.date_range(start=start_ts, end=end_ts, freq="D")
+
+                    # ======================================================
+                    # 🔧 4) Raccourcir les noms d'exceptions (même logique que ton autre graphique)
+                    # ======================================================
+
+                    max_len = 60  # même valeur utilisée ailleurs dans le projet
+
+                    df_top10_period["Exception_courte"] = (
+                        df_top10_period[EXCEPTION_COL]
+                        .astype(str)
+                        .str.slice(0, max_len)
+                    )
+
+                    # Ajouter "..." si tronqué
+                    mask_tronque = df_top10_period[EXCEPTION_COL].str.len() > max_len
+                    df_top10_period.loc[mask_tronque, "Exception_courte"] = (
+                        df_top10_period.loc[mask_tronque, "Exception_courte"] + "..."
+                    )
+
+                    # ======================================================
+                    # 🔧 5) Construire la matrice Date × Exception_courte (avec 0 pour absences)
+                    # ======================================================
+
+                    pivot = (
+                        df_top10_period
+                        .groupby([DATE_COL, "Exception_courte"])
+                        .size()
+                        .reset_index(name="count")
+                        .pivot(index=DATE_COL, columns="Exception_courte", values="count")
+                    )
+
+                    # Réindexer sur toutes les dates = ajoute les jours absents → remplis par 0
+                    pivot = pivot.reindex(all_dates, fill_value=0)
+
+                    # ======================================================
+                    # 🔧 6) Format long pour Plotly
+                    # ======================================================
+
+                    pivot_long = pivot.reset_index().melt(
+                        id_vars="index",
+                        var_name="Exception",
+                        value_name="Occurrences",
+                    )
+
+                    pivot_long.rename(columns={"index": DATE_COL}, inplace=True)
+
+                    # ======================================================
+                    # 🎨 7) Plot final (multi-lignes)
+                    # ======================================================
+
+                    fig_top10 = px.line(
+                        pivot_long,
+                        x=DATE_COL,
+                        y="Occurrences",
+                        color="Exception",
+                        markers=True,
+                        title="Évolution journalière des Top 10 exceptions",
+                    )
+
+                    # Ajustement de lisibilité
+                    fig_top10.update_layout(
+                        legend=dict(
+                            font=dict(size=10),
+                            itemsizing="constant",
+                        ),
+                        margin=dict(l=0, r=0, t=50, b=0)
+                    )
+                    # fig_top10.update_yaxes(type="log")
+
+                    st.plotly_chart(fig_top10, use_container_width=True)
+
+
+
+                    # ======================================================
+                    # 🔵 GRAPHIQUE FINAL : Évolution journalière des Top 10 exceptions
+                    # ======================================================
+
+                    st.subheader("Évolution journalière des Top 10 exceptions")
+
+                    # 1) Sélection des Top 10 exceptions
+                    top10 = exceptions_stats.head(10)[EXCEPTION_COL].tolist()
+
+                    # 2) Filtrer les données sur la période + top10
+                    df_top10_period = df_period[df_period[EXCEPTION_COL].isin(top10)].copy()
+
+                    # 3) Générer les dates continues de la période
+                    all_dates = pd.date_range(start=start_ts, end=end_ts, freq="D")
+
+                    # 4) Raccourcir les noms pour une légende lisible
+                    max_len = 60
+                    df_top10_period["Exception_courte"] = (
+                        df_top10_period[EXCEPTION_COL].astype(str).str.slice(0, max_len)
+                    )
+                    mask_tronque = df_top10_period[EXCEPTION_COL].str.len() > max_len
+                    df_top10_period.loc[mask_tronque, "Exception_courte"] = (
+                        df_top10_period.loc[mask_tronque, "Exception_courte"] + "..."
+                    )
+
+                    # 5) Pivot Date × Exception_courte
+                    pivot = (
+                        df_top10_period
+                        .groupby([DATE_COL, "Exception_courte"])
+                        .size()
+                        .reset_index(name="count")
+                        .pivot(index=DATE_COL, columns="Exception_courte", values="count")
+                    )
+
+                    # 6) Réindexer toutes les dates (jours absents -> 0)
+                    pivot = pivot.reindex(all_dates, fill_value=0)
+
+                    # 7) Format long pour Plotly
+                    pivot_long = pivot.reset_index().melt(
+                        id_vars="index",
+                        var_name="Exception",
+                        value_name="Occurrences",
+                    )
+                    pivot_long.rename(columns={"index": DATE_COL}, inplace=True)
+
+                    # 8) Figure
+                    fig_top10 = px.line(
+                        pivot_long,
+                        x=DATE_COL,
+                        y="Occurrences",
+                        color="Exception",
+                        markers=True,
+                        title="Évolution journalière des Top 10 exceptions",
+                    )
+
+                    fig_top10.update_layout(
+                        legend=dict(font=dict(size=10), itemsizing="constant"),
+                        margin=dict(l=0, r=0, t=50, b=0),
+                    )
+
+                    # 9) 📏 Y-axis: maximum = 2 × median of the daily total across Top 10
+                    daily_total_top10 = pivot.sum(axis=1)
+                    median_daily_total = float(daily_total_top10.mean())
+                    y_max = max(1.0, 2.0 * median_daily_total)
+
+                    # 👉 Pour éviter le clipping des pics, utilisez plutôt :
+                    # y_max = max(y_max, float(pivot.values.max()))
+
+                    fig_top10.update_yaxes(range=[0, y_max])
+
+                    # 10) Affichage
+                    st.plotly_chart(fig_top10, use_container_width=True)
+
+
 
                     # Bouton de téléchargement Excel
                     excel_exc_bytes = generate_single_sheet_excel(
