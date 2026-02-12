@@ -1,11 +1,13 @@
 import io
 from datetime import datetime, timedelta
 from typing import Tuple, Optional
+from collections import Counter, defaultdict
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.express as px
+import plotly.graph_objects as go
 
 
 # =========================
@@ -335,7 +337,7 @@ def build_dashboard(df: pd.DataFrame):
         y="Nombre de tickets",
         markers=True,
     )
-    st.plotly_chart(fig_daily, use_container_width=True)
+    st.plotly_chart(fig_daily, width="stretch")
 
     # Histogramme nombre de tickets par date
     st.subheader("Nombre de tickets par date")
@@ -344,7 +346,7 @@ def build_dashboard(df: pd.DataFrame):
         x=DATE_COL,
         y="Nombre de tickets",
     )
-    st.plotly_chart(fig_bar, use_container_width=True)
+    st.plotly_chart(fig_bar, width="stretch")
 
     # Graphique du nombre de tickets résolus vs non résolus
     st.subheader("Nombre de tickets résolus / non résolus")
@@ -378,7 +380,7 @@ def build_dashboard(df: pd.DataFrame):
             text="Nombre de tickets",
         )
         fig_resolved.update_traces(textposition="outside")
-        st.plotly_chart(fig_resolved, use_container_width=True)
+        st.plotly_chart(fig_resolved, width="stretch")
     else:
         st.info("Impossible de calculer les tickets résolus / non résolus.")
 
@@ -431,7 +433,7 @@ def build_dashboard(df: pd.DataFrame):
                     font=dict(size=10),
                 ),
             )
-            st.plotly_chart(fig_exceptions, use_container_width=True)
+            st.plotly_chart(fig_exceptions, width="stretch")
             # 🔹 Tableau récapitulatif des Top 10 exceptions
             st.markdown("### Détail des Top 10 exceptions")
 
@@ -446,7 +448,7 @@ def build_dashboard(df: pd.DataFrame):
 
             st.dataframe(
                 table_top_exceptions,
-                use_container_width=True
+                width="stretch"
             )
 
     else:
@@ -499,7 +501,7 @@ def build_dashboard(df: pd.DataFrame):
         markers=True,
     )
 
-    # Ajustements de lisibilité
+    # Ajustements de lisibilité(side legende)
     fig_exc_trend.update_layout(
         legend_title_text="Exception",
         legend=dict(
@@ -510,7 +512,7 @@ def build_dashboard(df: pd.DataFrame):
 
     fig_exc_trend.update_yaxes(type="log")
 
-    st.plotly_chart(fig_exc_trend, use_container_width=True)
+    st.plotly_chart(fig_exc_trend, width="stretch")
 
 
 # =========================
@@ -689,6 +691,15 @@ Cette application permet d'analyser quotidiennement les tickets à partir d'un f
 
             # Génération du fichier Excel en mémoire
             # La feuille 1 'Synthèse' doit contenir les statistiques pour toutes les dates
+
+            # Trier les nouveaux tickets par Exception
+            if EXCEPTION_COL in nouveaux_df.columns:
+                nouveaux_df = nouveaux_df.sort_values(by=EXCEPTION_COL, ascending=True)
+
+            # Trier les tickets traités par Exception
+            if EXCEPTION_COL in traites_df.columns:
+                traites_df = traites_df.sort_values(by=EXCEPTION_COL, ascending=True)
+
             excel_bytes = generate_excel_bytes(synthese_all_df, nouveaux_df, traites_df)
             st.session_state.excel_bytes = excel_bytes
 
@@ -819,6 +830,78 @@ Cette application permet d'analyser quotidiennement les tickets à partir d'un f
                     st.subheader("Exceptions distinctes sur la période sélectionnée")
                     st.dataframe(exceptions_stats)
 
+                    st.markdown("New Changes")
+                    # Pivot - count occurrences of each exception per date
+                    pivot = df_period.pivot_table(
+                        index="Exception",
+                        columns="Date",
+                        aggfunc="size",  # Count rows
+                        fill_value=0
+                    )
+                
+                    # Get top 10 exceptions by total occurrence
+                    pivot["Total"] = pivot.sum(axis=1)
+                    top_10 = pivot.nlargest(10, "Total")
+                
+                    st.subheader("🔝 Top 10 Exceptions")
+                    st.dataframe(top_10)
+
+                    max_len = 60
+                    line_data = top_10.drop(columns="Total").T
+
+                    # Build shortened names and make them unique if duplicates arise
+
+                    short_names = []
+                    for exc in line_data.columns:
+                        s = exc if len(exc) <= max_len else exc[:max_len] + "..."
+                        short_names.append(s)
+
+                    counts = Counter(short_names)
+                    seen = defaultdict(int)
+                    unique_names = []
+                    for name in short_names:
+                        if counts[name] > 1:
+                            seen[name] += 1
+                            unique_names.append(f"{name} ({seen[name]})")
+                        else:
+                            unique_names.append(name)
+
+                    exception_mapping = dict(zip(line_data.columns, unique_names))
+                    line_data_short = line_data.rename(columns=exception_mapping)
+
+                    # ===============================
+                    # 🎨 Construction du graphique
+                    # ===============================
+
+                    # Create Plotly line chart
+                    fig = go.Figure()
+                    for col in line_data_short.columns:
+                        fig.add_trace(go.Scatter(
+                        x=list(line_data_short.index),
+                        y=line_data_short[col].values.tolist(),
+                        mode='lines+markers',
+                        name=col,
+                        hovertemplate=
+                            "Exception=%{fullData.name}<br>" +
+                            "Date=%{x}<br>" +
+                            "Occurrences=%{y}<extra></extra>"
+                    ))
+
+                    fig.update_layout(
+                        legend=dict(
+                            font=dict(size=10),
+                            itemsizing="constant"
+                        ),
+                        margin=dict(l=0, r=0, t=50, b=0),
+                        xaxis_title="Date",
+                        yaxis_title="Number of Occurrences",
+                        height=500
+                    )
+
+                    st.plotly_chart(fig, width='stretch')
+
+                    
+
                     # Sélection d'une exception pour visualiser son évolution quotidienne
                     st.subheader(
                         "Évolution quotidienne d'une exception sur la période sélectionnée"
@@ -857,12 +940,174 @@ Cette application permet d'analyser quotidiennement les tickets à partir d'un f
                                 markers=True,
                             )
                             st.plotly_chart(
-                                fig_exc_daily, use_container_width=True
+                                fig_exc_daily, width="stretch"
                             )
                     else:
                         st.info(
                             "Aucune exception distincte à afficher pour la période sélectionnée."
                         )
+
+                    # # ======================================================
+                    # # 🔵 GRAPHIQUE FINAL : Évolution journalière des Top 10 exceptions
+                    # # ======================================================
+
+                    # st.subheader("Évolution journalière des Top 10 exceptions")
+
+                    # # 1) Sélection des Top 10 exceptions
+                    # top10 = exceptions_stats.head(10)[EXCEPTION_COL].tolist()
+
+                    # # 2) Filtrer les données sur la période + top10
+                    # df_top10_period = df_period[df_period[EXCEPTION_COL].isin(top10)].copy()
+
+                    # # 3) Générer les dates continues de la période
+                    # all_dates = pd.date_range(start=start_ts, end=end_ts, freq="D")
+
+                    # # ======================================================
+                    # # 🔧 4) Raccourcir les noms d'exceptions (même logique que ton autre graphique)
+                    # # ======================================================
+
+                    # max_len = 60  # même valeur utilisée ailleurs dans le projet
+
+                    # df_top10_period["Exception_courte"] = (
+                    #     df_top10_period[EXCEPTION_COL]
+                    #     .astype(str)
+                    #     .str.slice(0, max_len)
+                    # )
+
+                    # # Ajouter "..." si tronqué
+                    # mask_tronque = df_top10_period[EXCEPTION_COL].str.len() > max_len
+                    # df_top10_period.loc[mask_tronque, "Exception_courte"] = (
+                    #     df_top10_period.loc[mask_tronque, "Exception_courte"] + "..."
+                    # )
+
+                    # # ======================================================
+                    # # 🔧 5) Construire la matrice Date × Exception_courte (avec 0 pour absences)
+                    # # ======================================================
+
+                    # pivot = (
+                    #     df_top10_period
+                    #     .groupby([DATE_COL, "Exception_courte"])
+                    #     .size()
+                    #     .reset_index(name="count")
+                    #     .pivot(index=DATE_COL, columns="Exception_courte", values="count")
+                    # )
+
+                    # # Réindexer sur toutes les dates = ajoute les jours absents → remplis par 0
+                    # pivot = pivot.reindex(all_dates, fill_value=0)
+
+                    # # ======================================================
+                    # # 🔧 6) Format long pour Plotly
+                    # # ======================================================
+
+                    # pivot_long = pivot.reset_index().melt(
+                    #     id_vars="index",
+                    #     var_name="Exception",
+                    #     value_name="Occurrences",
+                    # )
+
+                    # pivot_long.rename(columns={"index": DATE_COL}, inplace=True)
+
+                    # # ======================================================
+                    # # 🎨 7) Plot final (multi-lignes)
+                    # # ======================================================
+
+                    # fig_top10 = px.line(
+                    #     pivot_long,
+                    #     x=DATE_COL,
+                    #     y="Occurrences",
+                    #     color="Exception",
+                    #     markers=True,
+                    #     title="Évolution journalière des Top 10 exceptions",
+                    # )
+
+                    # # Ajustement de lisibilité
+                    # fig_top10.update_layout(
+                    #     legend=dict(
+                    #         font=dict(size=10),
+                    #         itemsizing="constant",
+                    #     ),
+                    #     margin=dict(l=0, r=0, t=50, b=0)
+                    # )
+                    # # fig_top10.update_yaxes(type="log")
+
+                    # st.plotly_chart(fig_top10, width="stretch")
+
+
+
+                    # # ======================================================
+                    # # 🔵 GRAPHIQUE FINAL : Évolution journalière des Top 10 exceptions
+                    # # ======================================================
+
+                    # st.subheader("Évolution journalière des Top 10 exceptions")
+
+                    # # 1) Sélection des Top 10 exceptions
+                    # top10 = exceptions_stats.head(10)[EXCEPTION_COL].tolist()
+
+                    # # 2) Filtrer les données sur la période + top10
+                    # df_top10_period = df_period[df_period[EXCEPTION_COL].isin(top10)].copy()
+
+                    # # 3) Générer les dates continues de la période
+                    # all_dates = pd.date_range(start=start_ts, end=end_ts, freq="D")
+
+                    # # 4) Raccourcir les noms pour une légende lisible
+                    # max_len = 60
+                    # df_top10_period["Exception_courte"] = (
+                    #     df_top10_period[EXCEPTION_COL].astype(str).str.slice(0, max_len)
+                    # )
+                    # mask_tronque = df_top10_period[EXCEPTION_COL].str.len() > max_len
+                    # df_top10_period.loc[mask_tronque, "Exception_courte"] = (
+                    #     df_top10_period.loc[mask_tronque, "Exception_courte"] + "..."
+                    # )
+
+                    # # 5) Pivot Date × Exception_courte
+                    # pivot = (
+                    #     df_top10_period
+                    #     .groupby([DATE_COL, "Exception_courte"])
+                    #     .size()
+                    #     .reset_index(name="count")
+                    #     .pivot(index=DATE_COL, columns="Exception_courte", values="count")
+                    # )
+
+                    # # 6) Réindexer toutes les dates (jours absents -> 0)
+                    # pivot = pivot.reindex(all_dates, fill_value=0)
+
+                    # # 7) Format long pour Plotly
+                    # pivot_long = pivot.reset_index().melt(
+                    #     id_vars="index",
+                    #     var_name="Exception",
+                    #     value_name="Occurrences",
+                    # )
+                    # pivot_long.rename(columns={"index": DATE_COL}, inplace=True)
+
+                    # # 8) Figure
+                    # fig_top10 = px.line(
+                    #     pivot_long,
+                    #     x=DATE_COL,
+                    #     y="Occurrences",
+                    #     color="Exception",
+                    #     markers=True,
+                    #     title="Évolution journalière des Top 10 exceptions",
+                    # )
+
+                    # fig_top10.update_layout(
+                    #     legend=dict(font=dict(size=10), itemsizing="constant"),
+                    #     margin=dict(l=0, r=0, t=50, b=0),
+                    # )
+
+                    # # 9) 📏 Y-axis: maximum = 2 × median of the daily total across Top 10
+                    # daily_total_top10 = pivot.sum(axis=1)
+                    # median_daily_total = float(daily_total_top10.mean())
+                    # y_max = max(1.0, 2.0 * median_daily_total)
+
+                    # # 👉 Pour éviter le clipping des pics, utilisez plutôt :
+                    # # y_max = max(y_max, float(pivot.values.max()))
+
+                    # fig_top10.update_yaxes(range=[0, y_max])
+
+                    # # 10) Affichage
+                    # st.plotly_chart(fig_top10, width="stretch")
+
+
 
                     # Bouton de téléchargement Excel
                     excel_exc_bytes = generate_single_sheet_excel(
