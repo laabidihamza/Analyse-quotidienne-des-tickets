@@ -900,8 +900,6 @@ Cette application permet d'analyser quotidiennement les tickets à partir d'un f
 
                     st.plotly_chart(fig, width='stretch')
 
-                    
-
                     # Sélection d'une exception pour visualiser son évolution quotidienne
                     st.subheader(
                         "Évolution quotidienne d'une exception sur la période sélectionnée"
@@ -922,26 +920,69 @@ Cette application permet d'analyser quotidiennement les tickets à partir d'un f
                         df_exc_selected = df_period[
                             df_period[EXCEPTION_COL] == selected_exception
                         ].copy()
-                        daily_counts = (
-                            df_exc_selected.groupby(DATE_COL)[EXCEPTION_COL]
-                            .count()
-                            .reset_index(name="Nombre d'occurrences")
+
+                        # Ensure date column is datetime and normalized (no time component)
+                        df_exc_selected[DATE_COL] = pd.to_datetime(
+                            df_exc_selected[DATE_COL], errors="coerce"
+                        ).dt.normalize()
+
+                        # Full date range for the selected period (normalized)
+                        all_dates = pd.date_range(start=start_ts.normalize(), end=end_ts.normalize(), freq="D")
+
+                        # Count occurrences per date, reindex to include missing days as 0
+                        daily_counts_series = (
+                            df_exc_selected.groupby(DATE_COL).size().reindex(all_dates, fill_value=0)
                         )
 
-                        if daily_counts.empty:
+                        # Convert the Series to a proper DataFrame with date column
+                        daily_counts = daily_counts_series.reset_index()
+                        daily_counts.columns = [DATE_COL, "Occurrences"]
+
+                        # If there are no occurrences (all zeros), show info
+                        if daily_counts["Occurrences"].sum() == 0:
                             st.info(
                                 "Aucune occurrence de cette exception sur la période sélectionnée."
                             )
                         else:
-                            fig_exc_daily = px.line(
-                                daily_counts,
-                                x=DATE_COL,
-                                y="Nombre d'occurrences",
-                                markers=True,
+
+                            fig = go.Figure()
+
+                            fig.add_trace(
+                                go.Scatter(
+                                    x=daily_counts[DATE_COL],
+                                    y=daily_counts["Occurrences"],
+                                    mode="lines+markers",
+                                    name=selected_exception,
+                                    hovertemplate=
+                                        "Exception=%{fullData.name}<br>" +
+                                        "Date=%{x}<br>" +
+                                        "Occurrences=%{y}<extra></extra>"
+                                )
                             )
-                            st.plotly_chart(
-                                fig_exc_daily, width="stretch"
+
+                            fig.update_layout(
+                                template="plotly_dark",
+                                xaxis_title="Date",
+                                yaxis_title="Number of Occurrences",
+                                legend=dict(font=dict(size=10)),
+                                margin=dict(l=0, r=0, t=40, b=0),
+                                height=500,
                             )
+
+                            st.plotly_chart(fig, width='stretch')
+
+
+
+                            # fig_exc_daily = px.line(
+                            #     daily_counts,
+                            #     x=DATE_COL,
+                            #     y="Nombre d'occurrences",
+                            #     markers=True,
+                                
+                            # )
+                            # st.plotly_chart(
+                            #     fig_exc_daily, width="stretch"
+                            # )
                     else:
                         st.info(
                             "Aucune exception distincte à afficher pour la période sélectionnée."
