@@ -828,6 +828,22 @@ Cette application permet d'analyser quotidiennement les tickets à partir d'un f
                     st.subheader("Exceptions distinctes sur la période sélectionnée")
                     st.dataframe(exceptions_stats)
 
+                    # Pivot - count occurrences of each exception per date
+                    pivot = df.pivot_table(
+                        index="Exception",
+                        columns="Date",
+                        aggfunc="size",  # Count rows
+                        fill_value=0
+                    )
+                
+                    # Get top 10 exceptions by total occurrence
+                    pivot["Total"] = pivot.sum(axis=1)
+                    top_10 = pivot.nlargest(10, "Total")
+                
+                    st.subheader("🔝 Top 10 Exceptions")
+                    st.dataframe(top_10)
+                    
+
                     # Sélection d'une exception pour visualiser son évolution quotidienne
                     st.subheader(
                         "Évolution quotidienne d'une exception sur la période sélectionnée"
