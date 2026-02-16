@@ -139,7 +139,7 @@ def compute_synthesis(
     return synthese_df
 
 
-def compute_synthesis_all_dates(df: pd.DataFrame) -> pd.DataFrame:
+def compute_synthesis_all_dates(df: pd.DataFrame, shift_metrics_by_one_day: bool = True) -> pd.DataFrame:
     """
     Calcule la synthèse pour **toutes** les dates présentes dans le fichier d'entrée.
 
@@ -149,6 +149,10 @@ def compute_synthesis_all_dates(df: pd.DataFrame) -> pd.DataFrame:
     - Nombre des tickets à la date d
 
     La logique j-1 utilise compute_j_minus_1, ce qui applique aussi les cas particuliers métier.
+    
+    Si shift_metrics_by_one_day=True (par défaut), les deux premières colonnes de métriques
+    (cas traités et nouveaux cas) sont décalées d'une ligne vers le bas pour refléter que
+    les données reçues le jour j reflètent l'état de j-1.
     """
     if df.empty:
         return pd.DataFrame(
@@ -200,6 +204,18 @@ def compute_synthesis_all_dates(df: pd.DataFrame) -> pd.DataFrame:
     synthese_all_df = pd.DataFrame(rows)
     # Tri par date pour garantir l'ordre
     synthese_all_df = synthese_all_df.sort_values(by="Date").reset_index(drop=True)
+    
+    # Décalage des métriques d'un jour si activé
+    if shift_metrics_by_one_day and len(synthese_all_df) > 1:
+        synthese_all_df["Nombre des cas traités à la date j"] = (
+            synthese_all_df["Nombre des cas traités à la date j"].shift(-1)
+        )
+        synthese_all_df["Nombre des nouveaux cas à la date j"] = (
+            synthese_all_df["Nombre des nouveaux cas à la date j"].shift(-1)
+        )
+        # Suppression de la dernière ligne (qui contient NaN après décalage)
+        synthese_all_df = synthese_all_df.iloc[:-1].reset_index(drop=True)
+    
     return synthese_all_df
 
 
@@ -349,40 +365,40 @@ def build_dashboard(df: pd.DataFrame):
     st.plotly_chart(fig_bar, width="stretch")
 
     # Graphique du nombre de tickets résolus vs non résolus
-    st.subheader("Nombre de tickets résolus / non résolus")
-    # Un ticket est résolu si sa référence n'apparaît qu'une seule fois
-    # Comptage du nombre d'occurrences par référence de ticket
-    counts_by_ref = (
-        df[TICKET_ID_COL]
-        .astype(str)
-        .value_counts()
-        .reset_index()
-    )
-    # Colonnes : [Référence du ticket, count]
-    counts_by_ref.columns = [TICKET_ID_COL, "count"]
+    # st.subheader("Nombre de tickets résolus / non résolus")
+    # # Un ticket est résolu si sa référence n'apparaît qu'une seule fois
+    # # Comptage du nombre d'occurrences par référence de ticket
+    # counts_by_ref = (
+    #     df[TICKET_ID_COL]
+    #     .astype(str)
+    #     .value_counts()
+    #     .reset_index()
+    # )
+    # # Colonnes : [Référence du ticket, count]
+    # counts_by_ref.columns = [TICKET_ID_COL, "count"]
 
-    # Statut : résolu si la référence apparaît une seule fois, sinon non résolu
-    counts_by_ref["Statut"] = "Non résolu (référence dupliquée)"
-    counts_by_ref.loc[counts_by_ref["count"] == 1, "Statut"] = (
-        "Résolu (référence unique)"
-    )
-    resolved_stats = (
-        counts_by_ref.groupby("Statut")["count"]
-        .sum()
-        .reset_index()
-        .rename(columns={"count": "Nombre de tickets"})
-    )
-    if not resolved_stats.empty:
-        fig_resolved = px.bar(
-            resolved_stats,
-            x="Statut",
-            y="Nombre de tickets",
-            text="Nombre de tickets",
-        )
-        fig_resolved.update_traces(textposition="outside")
-        st.plotly_chart(fig_resolved, width="stretch")
-    else:
-        st.info("Impossible de calculer les tickets résolus / non résolus.")
+    # # Statut : résolu si la référence apparaît une seule fois, sinon non résolu
+    # counts_by_ref["Statut"] = "Non résolu (référence dupliquée)"
+    # counts_by_ref.loc[counts_by_ref["count"] == 1, "Statut"] = (
+    #     "Résolu (référence unique)"
+    # )
+    # resolved_stats = (
+    #     counts_by_ref.groupby("Statut")["count"]
+    #     .sum()
+    #     .reset_index()
+    #     .rename(columns={"count": "Nombre de tickets"})
+    # )
+    # if not resolved_stats.empty:
+    #     fig_resolved = px.bar(
+    #         resolved_stats,
+    #         x="Statut",
+    #         y="Nombre de tickets",
+    #         text="Nombre de tickets",
+    #     )
+    #     fig_resolved.update_traces(textposition="outside")
+    #     st.plotly_chart(fig_resolved, width="stretch")
+    # else:
+    #     st.info("Impossible de calculer les tickets résolus / non résolus.")
 
     # Pie chart : top 10 exceptions les plus fréquentes
     st.subheader("Top 10 des exceptions (camembert)")
@@ -456,7 +472,7 @@ def build_dashboard(df: pd.DataFrame):
 
     
     # 🔹 Line plot : évolution journalière des Top 10 exceptions
-    st.markdown("### Évolution journalière des Top 10 exceptions")
+    st.subheader("Évolution journalière des Top 10 exceptions")
 
     # Noms des Top 10 exceptions (issus du camembert)
     top_10_exception_names = top_exceptions[EXCEPTION_COL].tolist()
@@ -491,28 +507,53 @@ def build_dashboard(df: pd.DataFrame):
         .size()
         .reset_index(name="Nombre d'occurrences")
     )
-
     # Line plot avec 10 courbes
-    fig_exc_trend = px.line(
-        daily_exception_counts,
-        x=DATE_COL,
-        y="Nombre d'occurrences",
-        color="Exception_courte",
-        markers=True,
+    available_exceptions = sorted(
+        daily_exception_counts["Exception_courte"].unique().tolist()
     )
 
-    # Ajustements de lisibilité(side legende)
-    fig_exc_trend.update_layout(
-        legend_title_text="Exception",
-        legend=dict(
-            font=dict(size=10),
-        ),
-        margin=dict(l=0, r=0, t=40, b=0),
-    )
+    # Render checkboxes for each available exception (default checked)
+    selected_exceptions = []
+    for i, exc in enumerate(available_exceptions):
+        if st.checkbox(exc, value=True, key=f"dash_exc_cb_{i}"):
+            selected_exceptions.append(exc)
 
-    fig_exc_trend.update_yaxes(type="log")
+    if not selected_exceptions:
+        st.info(
+            "Aucune exception sélectionnée. Sélectionnez au moins une exception pour afficher le graphique."
+        )
+    else:
+        total_occurrences = int(
+            daily_exception_counts[
+                daily_exception_counts["Exception_courte"].isin(selected_exceptions)
+            ]["Nombre d'occurrences"].sum()
+        )
 
-    st.plotly_chart(fig_exc_trend, width="stretch")
+        # Filter and plot only selected exceptions
+        df_plot = daily_exception_counts[
+            daily_exception_counts["Exception_courte"].isin(selected_exceptions)
+        ].copy()
+
+        fig_exc_trend = px.line(
+            df_plot,
+            x=DATE_COL,
+            y="Nombre d'occurrences",
+            color="Exception_courte",
+            markers=True,
+        )
+
+        # Ajustements de lisibilité
+        fig_exc_trend.update_layout(
+            legend_title_text="Exception",
+            legend=dict(font=dict(size=10)),
+            margin=dict(l=0, r=0, t=40, b=0),
+        )
+
+        fig_exc_trend.update_yaxes(type="log")
+
+        st.plotly_chart(fig_exc_trend, width="stretch")
+
+        st.metric("Occurrences totales sélectionnées", total_occurrences)
 
 
 # =========================
@@ -830,7 +871,6 @@ Cette application permet d'analyser quotidiennement les tickets à partir d'un f
                     st.subheader("Exceptions distinctes sur la période sélectionnée")
                     st.dataframe(exceptions_stats)
 
-                    st.markdown("New Changes")
                     # Pivot - count occurrences of each exception per date
                     pivot = df_period.pivot_table(
                         index="Exception",
@@ -842,6 +882,12 @@ Cette application permet d'analyser quotidiennement les tickets à partir d'un f
                     # Get top 10 exceptions by total occurrence
                     pivot["Total"] = pivot.sum(axis=1)
                     top_10 = pivot.nlargest(10, "Total")
+
+                    # Format date columns to DD-MM format (keep "Total" unchanged)
+                    top_10.columns = [
+                        col.strftime('%d-%m') if hasattr(col, 'strftime') else col
+                        for col in top_10.columns
+                    ]
                 
                     st.subheader("🔝 Top 10 Exceptions")
                     st.dataframe(top_10)
@@ -870,35 +916,56 @@ Cette application permet d'analyser quotidiennement les tickets à partir d'un f
                     line_data_short = line_data.rename(columns=exception_mapping)
 
                     # ===============================
-                    # 🎨 Construction du graphique
+                    # 🎨 Construction du graphique (avec checkboxes pour Top10)
                     # ===============================
 
-                    # Create Plotly line chart
-                    fig = go.Figure()
-                    for col in line_data_short.columns:
-                        fig.add_trace(go.Scatter(
-                        x=list(line_data_short.index),
-                        y=line_data_short[col].values.tolist(),
-                        mode='lines+markers',
-                        name=col,
-                        hovertemplate=
-                            "Exception=%{fullData.name}<br>" +
-                            "Date=%{x}<br>" +
-                            "Occurrences=%{y}<extra></extra>"
-                    ))
+                    # Render checkboxes for the short names (unique_names)
+                    selected_short = []
+                    for i, short in enumerate(unique_names):
+                        if st.checkbox(short, value=True, key=f"exc_tab_cb_{i}"):
+                            selected_short.append(short)
 
-                    fig.update_layout(
-                        legend=dict(
-                            font=dict(size=10),
-                            itemsizing="constant"
-                        ),
-                        margin=dict(l=0, r=0, t=50, b=0),
-                        xaxis_title="Date",
-                        yaxis_title="Number of Occurrences",
-                        height=500
-                    )
+                    if not selected_short:
+                        st.info("Aucune exception sélectionnée pour le Top 10.")
+                    else:
+                        # Map short names back to full exception keys
+                        mapping_inv = {v: k for k, v in exception_mapping.items()}
+                        selected_full = [mapping_inv[s] for s in selected_short if s in mapping_inv]
 
-                    st.plotly_chart(fig, width='stretch')
+                        # Compute total occurrences from the 'Total' column
+                        try:
+                            total_selected_exc = int(top_10.loc[selected_full]["Total"].sum()) if selected_full else 0
+                        except Exception:
+                            total_selected_exc = 0
+
+                        # Prepare and plot only selected short names
+                        line_data_plot = line_data_short[selected_short].copy()
+
+                        fig = go.Figure()
+                        for col in line_data_plot.columns:
+                            fig.add_trace(go.Scatter(
+                                x=list(line_data_plot.index),
+                                y=line_data_plot[col].values.tolist(),
+                                mode='lines',
+                                name=col,
+                                hovertemplate=(
+                                    "Exception=%{fullData.name}<br>" +
+                                    "Date=%{x}<br>" +
+                                    "Occurrences=%{y}<extra></extra>"
+                                ),
+                            ))
+
+                        fig.update_layout(
+                            margin=dict(l=0, r=0, t=50, b=0),
+                            xaxis_title="Date",
+                            yaxis_title="Number of Occurrences",
+                            height=500,
+                        )
+
+                        st.subheader("Évolution journalière des Top 10 exceptions")
+                        st.plotly_chart(fig, width='stretch')
+
+                        st.metric("Total des occurrences (Top10 sélectionnées)", total_selected_exc)
 
                     # Sélection d'une exception pour visualiser son évolution quotidienne
                     st.subheader(
@@ -951,7 +1018,7 @@ Cette application permet d'analyser quotidiennement les tickets à partir d'un f
                                 go.Scatter(
                                     x=daily_counts[DATE_COL],
                                     y=daily_counts["Occurrences"],
-                                    mode="lines+markers",
+                                    mode="lines",
                                     name=selected_exception,
                                     hovertemplate=
                                         "Exception=%{fullData.name}<br>" +
