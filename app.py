@@ -808,7 +808,7 @@ Cette application permet d'analyser quotidiennement les tickets à partir d'un f
             # 3) Éliminer les doublons par référence du ticket (on garde la dernière occurrence par date)
             df_exc = (
                 df_exc.sort_values(by=[DATE_COL])
-                .drop_duplicates(subset=[TICKET_ID_COL], keep="last")
+                # .drop_duplicates(subset=[TICKET_ID_COL], keep="last")
                 .reset_index(drop=True)
             )
 
@@ -860,37 +860,44 @@ Cette application permet d'analyser quotidiennement les tickets à partir d'un f
                         "Veuillez choisir une autre plage de dates."
                     )
                 else:
-                    # Tableau des exceptions distinctes et de leur nombre total
-                    exceptions_stats = (
-                        df_period[EXCEPTION_COL]
-                        .value_counts()
-                        .reset_index(name="Nombre d'occurrences")
-                        .rename(columns={"index": EXCEPTION_COL})
-                    )
-
-                    st.subheader("Exceptions distinctes sur la période sélectionnée")
-                    st.dataframe(exceptions_stats)
-
                     # Pivot - count occurrences of each exception per date
                     pivot = df_period.pivot_table(
-                        index="Exception",
-                        columns="Date",
+                        index=EXCEPTION_COL,
+                        columns=DATE_COL,
                         aggfunc="size",  # Count rows
                         fill_value=0
                     )
-                
-                    # Get top 10 exceptions by total occurrence
+
+                    # Add Total column
                     pivot["Total"] = pivot.sum(axis=1)
-                    top_10 = pivot.nlargest(10, "Total")
 
                     # Format date columns to DD-MM format (keep "Total" unchanged)
-                    top_10.columns = [
-                        col.strftime('%d-%m') if hasattr(col, 'strftime') else col
-                        for col in top_10.columns
-                    ]
+                    new_columns = []
+                    for col in pivot.columns:
+                        if col == "Total":
+                            new_columns.append(col)
+                        else:
+                            try:
+                                ts = pd.to_datetime(col)
+                                new_columns.append(ts.strftime("%d-%m"))
+                            except Exception:
+                                new_columns.append(str(col))
+                    pivot.columns = new_columns
+
+                    st.subheader("Exceptions distinctes sur la période sélectionnée")
+                    # st.dataframe(pivot.sort_values("Total", ascending=False))
+
+                    # Create exceptions_stats from pivot for later use (if needed)
+                    exceptions_stats = pivot.sort_values("Total", ascending=False).reset_index().rename(columns={EXCEPTION_COL: EXCEPTION_COL})
+                    # exceptions_stats = pivot.reset_index().rename(columns={EXCEPTION_COL: EXCEPTION_COL})
+
+                    st.dataframe(exceptions_stats)
                 
-                    st.subheader("🔝 Top 10 Exceptions")
-                    st.dataframe(top_10)
+                    # Get top 10 exceptions by total occurrence
+                    top_10 = pivot.nlargest(10, "Total")
+                
+                    # st.subheader("🔝 Top 10 Exceptions")
+                    # st.dataframe(top_10)
 
                     max_len = 60
                     line_data = top_10.drop(columns="Total").T
@@ -1232,6 +1239,7 @@ Cette application permet d'analyser quotidiennement les tickets à partir d'un f
                             "application/vnd.openxmlformats-officedocument."
                             "spreadsheetml.sheet"
                         ),
+                        key="download_report_1"
                     )
 
 
