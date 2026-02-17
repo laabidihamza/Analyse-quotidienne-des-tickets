@@ -811,6 +811,10 @@ Cette application permet d'analyser quotidiennement les tickets à partir d'un f
                 # .drop_duplicates(subset=[TICKET_ID_COL], keep="last")
                 .reset_index(drop=True)
             )
+            toggle = st.toggle("Drop Dublicates")
+
+            if toggle:
+                df_exc = df_exc.drop_duplicates(subset=[TICKET_ID_COL], keep="last")
 
             st.markdown(
                 "Sélectionnez une période pour analyser les exceptions distinctes "
