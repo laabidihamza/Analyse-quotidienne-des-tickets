@@ -896,6 +896,44 @@ Cette application permet d'analyser quotidiennement les tickets à partir d'un f
                     # exceptions_stats = pivot.reset_index().rename(columns={EXCEPTION_COL: EXCEPTION_COL})
 
                     st.dataframe(exceptions_stats)
+
+                    # Initialize session state for selected exceptions
+                    if 'selected_exceptions' not in st.session_state:
+                        st.session_state.selected_exceptions = []
+
+                    # Multiselect for exceptions
+                    selected = st.multiselect(
+                        "Sélectionnez les exceptions à ajouter au tableau",
+                        options=exceptions_stats[EXCEPTION_COL].tolist(),
+                        default=st.session_state.selected_exceptions
+                    )
+
+                    # Update session state
+                    st.session_state.selected_exceptions = selected
+
+                    # Filter exceptions_stats to selected
+                    if selected:
+                        selected_exceptions_df = exceptions_stats[exceptions_stats[EXCEPTION_COL].isin(selected)].copy()
+                    else:
+                        selected_exceptions_df = exceptions_stats.iloc[0:0].copy()  # Empty with same columns
+
+                    # Display the table
+                    st.subheader("Exceptions sélectionnées")
+                    st.dataframe(selected_exceptions_df)
+
+                    # Download button for selected exceptions
+                    if not selected_exceptions_df.empty:
+                        excel_selected_bytes = generate_single_sheet_excel(
+                            selected_exceptions_df,
+                            sheet_name="Exceptions Sélectionnées",
+                        )
+                        st.download_button(
+                            label="Télécharger les exceptions sélectionnées (Excel)",
+                            data=excel_selected_bytes,
+                            file_name=f"exceptions_selectionnees_{start_ts.date()}_{end_ts.date()}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="download_selected_exceptions"
+                        )
                 
                     # Get top 10 exceptions by total occurrence
                     top_10 = pivot.nlargest(10, "Total")
